@@ -1,0 +1,271 @@
+---
+title: "NYC_Final"
+author: "Saichaitanya"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+pacman::p_load(pacman,
+  tidyverse, openxlsx, modeltime, parsnip, rsample, timetk, broom, ggthemes)
+library(stringr)
+library(dplyr)
+library(forecast)
+library(ggplot2)
+library(scales)
+library(zoo)
+library(tseries)
+library(prophet)
+```
+
+## Data Starts from 1st January 2021 and ends at 31st August 2023
+```{r}
+daily_rides = read.csv("daily_ride_data.csv")
+daily_rides.ts = ts(daily_rides$Num_Rides, start = c(2021,1,1), frequency = 365)
+print(daily_rides.ts)
+```
+
+## Decomposing the ride demand into trend, seasonality and Noise
+```{r}
+decompose_plot = decompose(daily_rides.ts)
+plot(decompose_plot)
+```
+
+## Plotting the trend line
+```{r}
+# Plotting the trend line
+rides.lm = lm(daily_rides.ts~time(daily_rides.ts))
+plot(daily_rides.ts, ylab = "Number of Daily Rides", main="Daily Demand over Time")
+abline(rides.lm, col=2)
+```
+
+## Splitting the Data into Training and Testing set
+```{r}
+# Number of validation rows
+nvalid <- 31
+
+# Determine the starting index for the validation set
+ntrain <- length(daily_rides.ts) - nvalid + 1
+
+# Create the training set
+train.ts <- head(daily_rides.ts, -nvalid)
+
+# Create the validation set
+valid.ts <- tail(daily_rides.ts, nvalid)
+```
+
+## Classical Decomposition Method
+```{r}
+## Fitting an Additive model with linear trend and seasonality
+model1 = tslm(train.ts ~ trend + season)
+autoplot(train.ts, col=1, main="Observed Values v/s Fitted Values", ylab="Daily Rides") + geom_line(aes(y=model1$fitted.values), col=4) +
+  scale_y_continuous(labels = comma)
+```
+
+```{r}
+## Fitting a Multiplicative model with linear trend and seasonality
+model2 = tslm(log(train.ts) ~ trend + season)
+autoplot(log(train.ts), main="Observed Values v/s Fitted values", ylab ="Log(Daily Rides)") + geom_line(aes(y=model2$fitted.values), col=4)
+```
+
+```{r}
+## Summary for Model1
+summary(model1)
+checkresiduals(model1)
+predictions_a = forecast(model1, newdata = valid.ts)
+accuracy(predictions_a, valid.ts)
+
+
+## Summary for Model2
+summary(model2)
+checkresiduals(model2)
+predictions_m = forecast(model2, newdata = valid.ts)
+accuracy(predictions_m, valid.ts)
+```
+
+Model1 has an R-Squared of 66.51
+Model2 has an R-Squared of 61.23
+
+## Seasonal Naive Model
+```{r}
+# 1 point ahead forecast
+naive = naive(train.ts, h = 12)
+print(naive)
+
+# 31 points ahead forecast using Seasonal Naive
+snaive = snaive(train.ts, h = 31)
+print(snaive)
+
+# Plotting the seasonal naive model's predicted output v/s observed output
+
+autoplot(train.ts, ylab = "NYC Taxi Demand", xlab = "Time") +
+autolayer(snaive, series = "Seasonal Naive", PI=F)+
+autolayer(naive, series = "Naive", PI=F) +
+autolayer(valid.ts, series = "Actual Data") +
+  ggtitle("Forecasted values over the validation set") +
+  scale_y_continuous(labels = comma)
+
+# Accuracy
+checkresiduals(snaive)
+accuracy(snaive, valid.ts)
+```
+
+## Rolling forward smoothing techniques with window size = 3
+```{r}
+w=3
+ma.roll.pred = rep(NA, nvalid)
+for (j in 1:nvalid){
+  ntrain = length(daily_rides.ts) - nvalid + (j-1)
+  train_temp.ts = daily_rides.ts[1:ntrain]
+  ma.roll.pred[j] = tail(rollmean(train_temp.ts, k=w, align = "center"),1)
+}
+
+ma.pred.ts = ts(ma.roll.pred, start = start(valid.ts), frequency=frequency(valid.ts))
+
+autoplot(daily_rides.ts, ylab="Ride Demand", xlab="Time") + 
+  autolayer(ma.pred.ts, series="Predicted values") + 
+  ggtitle("Daily Demand Forecast for NYC Taxis") +
+  scale_y_continuous(labels = comma)
+
+accuracy(ma.pred.ts, valid.ts)
+```
+
+## Holt winters models
+```{r}
+hw_model <- HoltWinters(train.ts)
+  
+# Forecast the next test_size periods
+hw_forecast <- forecast(hw_model, h=31)
+
+autoplot(daily_rides.ts, ylab="Ride Demand", xlab="Time") + 
+  autolayer(hw_forecast, series="Predicted values") + 
+  ggtitle("Daily Demand Forecast for NYC Taxis") +
+  scale_y_continuous(labels = comma)
+
+checkresiduals(hw_model)
+accuracy(hw_forecast, valid.ts)
+```
+
+
+## Seasonal Arima Model
+```{r}
+# Step-1 Test the Stationarity
+
+# Stationarity test
+result <- adf.test(train.ts)
+cat("ADF Statistic:", result$statistic, "\n")
+cat("P-value:", result$p.value, "\n")
+
+# Acf and Pacf
+par(mfrow = c(1,2))
+Acf(train.ts, 50)
+Pacf(train.ts, 50)
+
+# Seasonal arima
+seasonal_arima = Arima(train.ts, order = c(1,0,1), seasonal = list(order = c(0,1,0),
+period=12))
+
+checkresiduals(seasonal_arima)
+summary(seasonal_arima)
+m2.p = forecast(seasonal_arima, h=length(valid.ts))
+
+autoplot(valid.ts, ylab="Ride Demand", xlab="Time") + 
+  autolayer(m2.p, P=F, series="Predicted values") + 
+  ggtitle("Daily Demand Forecast for NYC Taxis") +
+  scale_y_continuous(labels = comma)
+
+options(warn=-1)
+
+autoplot(train.ts, ylab="Ride Demand", xlab="Time") + 
+  autolayer(m2.p, P=F, series="Predicted values") + 
+  autolayer(valid.ts, P=F, series = "Observed values") +
+  ggtitle("Daily Demand Forecast for NYC Taxis") +
+  scale_y_continuous(labels = comma)
+
+options(warn=-1)
+
+accuracy(m2.p, valid.ts)
+```
+
+
+## Predicting the sales for the next 1 month (Aug) using prophet model
+```{r}
+# The data starts from Jan 2021 and ends at July 2023, so we predict the demand for the next 1 month
+#plot(train.ts, ylab = "Number of Daily Rides", main="Daily Demand over Time")
+
+daily_rides_temp <- daily_rides
+daily_rides_temp$Date <- as.Date(daily_rides_temp$Date)
+
+daily_rides_temp <- daily_rides_temp %>%
+  rename(ds = Date, y = Num_Rides)
+
+splits <- daily_rides_temp %>%
+  time_series_split(date_var = ds, assess = "1 month", cumulative = TRUE)
+
+print(training(splits))
+
+model_prophet <- prophet() %>% 
+  fit.prophet(training(splits))
+
+future_temp <- data.frame(ds = seq(max(training(splits)$ds) + 1, by = "days", length.out = 31))
+
+forecast <- predict(model_prophet, future_temp)
+
+eval <- testing(splits) %>% 
+  mutate( 
+    ds = as.POSIXct(ds) 
+  ) %>% 
+  left_join(forecast) %>% 
+  select(ds, y, yhat, yhat_upper, yhat_lower) 
+eval
+
+forecast_data = eval$yhat
+print(forecast_data)
+print(testing(splits)$y)
+
+# Printing the eval metrics for the test set
+accuracy(testing(splits)$y, forecast_data)
+
+# Plotting the forecasted data v/s observed data
+pp = plot(model_prophet, forecast, xlab="Time", ylab = "NYC Taxi Demand") +
+  geom_line() +
+  geom_line(data = testing(splits) %>% mutate(ds = as.POSIXct(ds)), aes(x=ds, y=y), color="tomato3") +
+  ggtitle("Daily Demand Forecast for NYC Taxis using Prophet") +
+  scale_y_continuous(labels=comma)
+
+
+pp2 <- pp + geom_line()
+qq2 <- ggplot_build(pp2)
+qq2$data[[2]]$colour <- NA
+plot(ggplot_gtable(qq2)) 
+```
+
+## Predicting the sales for the next 5 months (Aug, Sep, Oct, Nov, Dec) of year 2023
+```{r}
+future_temp <- data.frame(ds = seq(max(training(splits)$ds) + 1, by = "days", length.out = 153))
+
+forecast <- predict(model_prophet, future_temp)
+
+pp = plot(model_prophet, forecast, xlab="Time", ylab = "NYC Taxi Demand")
+
+pp2 <- pp + geom_line() + 
+  ggtitle("Daily Demand Forecast for NYC Taxis using Prophet") +
+  scale_y_continuous(labels=comma)
+qq2 <- ggplot_build(pp2)
+qq2$data[[2]]$colour <- NA
+plot(ggplot_gtable(qq2)) 
+```

@@ -1,0 +1,620 @@
+---
+title: "LSTM and Visualizations"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+# EDA Visualization
+```{r}
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(scales)
+library(tidyr)
+library(gridExtra)
+
+# Read Data
+df = read.csv("Hourly_Rides_21-22-23.csv")
+df
+
+# Preprocessing data
+df <- df %>% mutate(DateHour = ymd_hms(DateHour))
+df <- df %>% mutate(Year = year(DateHour), 
+                    Month = month(DateHour, label = TRUE, abbr = T), 
+                    Hour = hour(DateHour), 
+                    DOW = weekdays(DateHour), 
+                    Date = as.Date(DateHour))
+
+df
+```
+
+# Plot Monthly Rides
+```{r}
+df_grouped <- df %>%
+  group_by(Year, Month) %>%
+  summarize(Num_Rides = sum(Num_Rides))
+
+df_grouped <- df_grouped %>%
+  mutate(Date = as.Date(paste(Year, Month, "01", sep = "-"), format = "%Y-%B-%d"))
+
+# Create a time series plot using ggplot2
+p1 <- ggplot(df_grouped, aes(x = Date, y = Num_Rides)) +
+  geom_line(color = "#3C7E4F", size = 1) +
+  geom_point(color = "#3C7E4F", size = 3) +
+  
+  # Optionally set labels and title
+  labs(x = 'Month', y = 'Number of Rides', title = 'Total Monthly Rides') +
+  
+  # Format x-axis ticks
+  scale_x_date(labels = scales::date_format('%Y\n%b'), breaks = seq(min(df_grouped$Date), max(df_grouped$Date), by = "4 month")) +
+  
+  # Format y-axis labels in millions (3M format)
+  scale_y_continuous(labels = unit_format(unit = "M", scale = 1e-6), breaks = seq(0, max(df_grouped$Num_Rides), by = 5e5))+
+  
+  # Change the theme
+  theme_minimal() +
+  
+  # Change the graph border line color
+  theme(axis.line = element_line(color = "black")) +
+  
+  # Set custom color palette (optional)
+  scale_color_manual(values = c("blue")) +
+  
+  # Adjust legend position (optional)
+  theme(legend.position = "none") +
+  
+
+  theme(axis.ticks = element_line(),
+        axis.ticks.x = element_line(),
+        axis.ticks.y = element_line(),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.title.y = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+        axis.text.x = element_text(size = 12, color = "black", angle = 0),
+        axis.text.y = element_text(size = 12, color = "black"),
+        panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"))
+        
+p1
+
+# ggsave("monthly_rides_plot.png", plot = p1, width = 10, height = 6, units = "in", dpi = 300)
+```
+
+```{r}
+df_grouped <- df %>%
+  group_by(Date) %>%
+  summarize(Num_Rides = sum(Num_Rides))
+
+# Create a time series plot using ggplot2
+p1 <- ggplot(df_grouped, aes(x = Date, y = Num_Rides)) +
+  geom_line(color = "#CC454B", size = 1) +
+  # Optionally set labels and title
+
+  # Format x-axis ticks
+  scale_x_date(labels = scales::date_format('%b %d\n%Y'), breaks = seq(min(df_grouped$Date), max(df_grouped$Date), by = "4 month")) +
+    
+  # Format y-axis labels in millions (3M format)
+  scale_y_continuous(labels = unit_format(unit = "M", scale = 1e-5), breaks = seq(0, max(df_grouped$Num_Rides), by = 1e4))+
+    
+  labs(x = 'Date', y = 'Number of Rides', title = 'Total Daily Rides') +
+  
+  # Change the graph border line color
+  theme(axis.line = element_line(color = "black")) +
+  
+  # Set custom color palette (optional)
+  scale_color_manual(values = c("blue")) +
+  
+  # Adjust legend position (optional)
+  theme(legend.position = "none") +
+  
+
+  theme(axis.ticks = element_line(),
+        axis.ticks.x = element_line(),
+        axis.ticks.y = element_line(),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.title.y = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+        axis.text.x = element_text(size = 12, color = "black", angle = 0),
+        axis.text.y = element_text(size = 12, color = "black"),
+        panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"))
+        
+p1
+# ggsave("daily_rides_plot.png", plot = p1, width = 10, height = 6, units = "in", dpi = 300)
+
+```
+
+```{r}
+Acf(ts(df_grouped$Num_Rides, start = c(2023,1,1), frequency = 365), lag.max =30)
+Pacf(ts(df_grouped$Num_Rides, start = c(2023,1,1), frequency = 365), lag.max =30)
+
+```
+
+
+# Plot Avg Num Rides by Duration and Hour
+```{r}
+# Group by Hour and calculate the mean
+df_grouped <-df %>% group_by(Hour) %>% summarize("2-5mins_Ride" = mean(X2.5mins_Ride),
+                                                 "5-15mins_Ride" = mean(X5.15mins_Ride),
+                                                 "15-30mins_Ride" = mean(X15.30mins_Ride),
+                                                 "30mins_plus_Ride" = mean(X30mins_plus_Ride))
+# Specify value variables (columns to melt)
+value_vars <- c("2-5mins_Ride", "5-15mins_Ride", "15-30mins_Ride", "30mins_plus_Ride")
+
+melted_df <- df_grouped %>% 
+  pivot_longer(cols = value_vars, names_to = "Ride_Duration", values_to = "Mean_Ride")
+
+melted_df$Ride_Duration <- factor(melted_df$Ride_Duration, levels = c("2-5mins_Ride", "5-15mins_Ride", "15-30mins_Ride", "30mins_plus_Ride"))
+
+# Define manual fill colors and legend titles
+manual_fill_colors <- c("#4C60A9", "#3C7E4F", "#CC454B", "#B9A23D")
+legend_titles <- c("2-5min Ride", "5-15min Ride", "15-30min Ride", "30min+ Ride")
+
+# Plotting the stacked bar chart
+p2 <- ggplot(melted_df, aes(x = Hour, y = Mean_Ride, fill = Ride_Duration)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8, alpha = 0.5) +
+  
+  scale_x_continuous(breaks = seq(0, 23, by = 1)) +
+  scale_y_continuous(breaks = seq(0, 7001, by = 1000)) +
+  
+  # Manually set fill colors and legend titles
+  scale_fill_manual(values = manual_fill_colors, name = "Ride Duration Category") +
+  
+  # Optionally set labels and title
+  labs(x = 'Hour', y = 'Average Number of Rides', title = 'Average Number of Rides by Duration and Hour',
+       fill = 'Ride Duration Category',labels = legend_titles) +
+
+  
+  theme(axis.ticks = element_line(),
+        axis.ticks.x = element_line(),
+        axis.ticks.y = element_line(),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.title.y = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+        axis.text.x = element_text(size = 12, color = "black", angle = 0),
+        axis.text.y = element_text(size = 12, color = "black"),
+        axis.line = element_line(color = "black"),
+        panel.grid = element_blank(),
+        legend.position = "bottom",
+        panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"))
+p2
+
+# Calculate proportion of ride
+sum1 = sum(df_grouped$`2-5mins_Ride`)
+sum2 = sum(df_grouped$`5-15mins_Ride`)
+sum3 = sum(df_grouped$`15-30mins_Ride`)
+sum4 = sum(df_grouped$`30mins_plus_Ride`)
+sum1 / sum(sum1, sum2, sum3, sum4)
+sum2 / sum(sum1, sum2, sum3, sum4)
+sum3 / sum(sum1, sum2, sum3, sum4)
+sum4 / sum(sum1, sum2, sum3, sum4)
+# ggsave("Avg_Num_Rides_by_Duration_and_Hr.png", plot = p2, width = 10, height = 6, units = "in", dpi = 300)
+
+```
+
+
+# Plot Average Ride Demand and Fare Amount by Hour
+```{r}
+df_grouped2 <- df %>%
+  group_by(Hour) %>%
+  summarize(FARE_AMOUNT = mean(FARE_AMOUNT))
+
+# Find a scale factor
+scale_factor <- 700
+
+# Plotting the stacked bar chart and line plot
+p3 <- ggplot() +
+  geom_bar(data = melted_df, aes(x = Hour, y = Mean_Ride, fill = Ride_Duration), stat = "identity", position = "stack", width = 0.8,alpha = 0.5) +
+  geom_line(data = df_grouped2, aes(x = Hour, y = (FARE_AMOUNT-10)*scale_factor,group = 1), color = "black")+
+  geom_point(data = df_grouped2, aes(x = Hour, y = (FARE_AMOUNT-10) * scale_factor), color = "black", size = 2,alpha = 0.7) +  # Add dots
+  geom_text(data = df_grouped2, aes(x = Hour, y = (FARE_AMOUNT-10) * scale_factor,label = round(FARE_AMOUNT,2)), vjust = -2,size = 2.5,color = "Black") +
+  
+  scale_x_continuous(breaks = seq(0, 23, by = 1)) +
+  scale_y_continuous(name = "Average Number of Rides",breaks = seq(0,7001,1000),
+                     sec.axis = sec_axis(~./scale_factor+10, name = 'Average Fare Amount', breaks = seq(10,21,2)))+
+  
+  # Manually set fill colors and legend titles
+  scale_fill_manual(values = manual_fill_colors, name = "Ride Duration Category") +
+  
+  # Optionally set labels and title
+  labs(x = 'Hour', y = 'Average Number of Rides', title = 'Average Ride Demand and Fare Amount by Hour',
+       fill = 'Ride Duration Category', labels = legend_titles) +
+  
+  theme(axis.ticks = element_line(),
+        axis.ticks.x = element_line(),
+        axis.ticks.y = element_line(),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.title.y = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+        axis.text.x = element_text(size = 12, color = "black", angle = 0),
+        axis.text.y = element_text(size = 12, color = "black"),
+        axis.line = element_line(color = "black"),
+        panel.grid = element_blank(),
+        legend.position = "bottom",
+        legend.title = element_text(face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"))
+p3
+
+# ggsave("Average_Ride_Demand_and_Fare_Amount_by_Hour.png", plot = p3, width = 10, height = 7, units = "in", dpi = 300)
+```
+
+
+# Plot Average Ride Demand and Fare Amount by Hour
+```{r}
+# Assuming df_grouped2 is already defined
+df_grouped <- df %>%
+  group_by(Hour) %>%
+  summarize(Fare_per_Minute = mean(Fare_per_Minute),
+            Fare_per_Distance = mean(Fare_per_Distance),
+            Average_Speed = mean(Trip_Speed.MPH.))
+# Specify value variables (columns to melt)
+value_vars <- c("Fare_per_Minute", "Fare_per_Distance")
+
+melted_df <- df_grouped %>% 
+  pivot_longer(cols = value_vars, names_to = "Metrics", values_to = "Average_Value")
+# Find a scale factor
+scale_factor <- max(df_grouped$Average_Speed)/max(melted_df$Average_Value)
+
+# Plotting the stacked bar chart and line plot
+p4 <- ggplot() +
+  geom_bar(data = df_grouped, aes(x = Hour, y = Average_Speed), stat = "identity", fill="#3C7E4F", alpha = 0.5, width = 0.8) +
+  geom_line(data = melted_df, aes(x = Hour, y = Average_Value*scale_factor, group = Metrics, color = Metrics)) +
+  geom_point(data = melted_df, aes(x = Hour, y = Average_Value*scale_factor, group = Metrics, color = Metrics), size = 2) +
+  geom_text(data = melted_df, aes(x = Hour, y = Average_Value*scale_factor, group = Metrics, color = Metrics,label = round(Average_Value,2)), vjust = 2.5,size = 2.5) +
+  
+  scale_color_manual(values = c("#CC454B", "#4C60A9"))+
+  
+  scale_x_continuous(breaks = seq(0, 23, by = 1)) +
+  scale_y_continuous(name = "Average Speed",breaks = seq(0,25,2),
+                     sec.axis = sec_axis(~./scale_factor, name = 'Average Fare Amount', breaks = seq(0,6.5,0.5)))+
+  
+  # Optionally set labels and title
+  labs(x = 'Hour', title = 'Average Fare Amount per Minute and per Mile vs. Average Speed') +
+  
+  theme(axis.ticks = element_line(),
+        axis.ticks.x = element_line(),
+        axis.ticks.y = element_line(),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.title.y = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+        axis.text.x = element_text(size = 12, color = "black", angle = 0),
+        axis.text.y = element_text(size = 12, color = "black"),
+        axis.line = element_line(color = "black"),
+        panel.grid = element_blank(),
+        legend.position = "bottom",
+        legend.title = element_text(face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"))
+p4
+
+# ggsave("Average_Fare_Amount_per_Minute_and_Mile_vs_Average Speed.png", plot = p4, width = 10, height = 7, units = "in", dpi = 300)
+```
+
+# Boxplot of Number of Rides by Days of the Week
+```{r}
+df_grouped <- df %>%
+  group_by(Year,Date, DOW) %>%
+  summarize(Num_Rides = mean(Num_Rides))
+
+day_order <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+year_colors <- c("2021" = "#4C60A9", "2022" = "#3C7E4F", "2023" = "#CC454B")
+
+p5 <- ggplot(df_grouped, aes(x = DOW, y = Num_Rides, fill = factor(Year))) +
+  geom_boxplot(alpha = 0.5, width = 0.8) +
+  
+  scale_y_continuous(breaks = seq(0, 7001, by = 1000)) +
+  scale_x_discrete(limits = day_order) +  # Set the order of days
+  labs(x = 'Day of the Week', y = 'Average Number of Rides') +
+  scale_fill_manual(values = year_colors,name = "Year") +  
+
+  ggtitle('Boxplot of Number of Rides by Days of the Week') +
+  theme(axis.ticks = element_line(),
+        axis.ticks.x = element_line(),
+        axis.ticks.y = element_line(),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.title.y = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+        axis.text.x = element_text(size = 12, color = "black", angle = 0),
+        axis.text.y = element_text(size = 12, color = "black"),
+        axis.line = element_line(color = "black"),
+        panel.grid = element_blank(),
+        legend.position = "bottom",
+        legend.title = element_text(face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"))
+
+p5
+
+# ggsave("Boxplot_of_Number_Rides_by_DOW.png", plot = p5, width = 10, height = 7, units = "in", dpi = 300)
+```
+```{r}
+df <- df %>%
+  group_by(Date) %>%
+  mutate(Perc_of_Daily_Demand = Num_Rides / sum(Num_Rides)) %>%
+  ungroup()
+```
+
+```{r}
+# Define a function for calculating confidence interval
+confidence_interval <- function(x) {
+  mean_val <- mean(x)
+  lower_bound <- quantile(x, 0.025)
+  upper_bound <- quantile(x, 0.975)
+  data.frame(Mean = mean_val, Lower = lower_bound, Upper = upper_bound)
+}
+
+# Loop through unique days of the week
+for (dow in unique(df$DOW)) {
+  temp <- df[df$DOW == dow, ]
+  result <- temp %>%
+    group_by(Hour) %>%
+    summarize(Mean = mean(Perc_of_Daily_Demand),
+              Lower = quantile(Perc_of_Daily_Demand, 0.025),
+              Upper = quantile(Perc_of_Daily_Demand, 0.975))
+
+  # Create ggplot
+  p = ggplot() +
+    geom_boxplot(data = temp, aes(x = factor(Hour), y = Perc_of_Daily_Demand), fill = '#3C7E4F', alpha = 0.8) +
+    geom_line(data = result, aes(x = factor(Hour), y = Mean, group = "Mean"), color = 'Black', size = 0.8, linetype = 'solid') +
+    geom_line(data = result, aes(x = factor(Hour), y = Lower, group = "Lower"), color = '#CC454B', size = 0.8, linetype = 'dashed') +
+    geom_line(data = result, aes(x = factor(Hour), y = Upper, group = "Upper"), color = '#4C60A9', size = 0.8, linetype = 'dashed') +
+    scale_y_continuous(breaks = seq(0, 0.1, by = 0.02)) +
+    ylim(0, 0.1) +
+    # Set labels and title
+    labs(x = 'Hour', y = 'Percentage of Daily Demand', 
+         title = paste("Average Demand of Each Hour On", dow)) +
+    
+    # Set manual color scale and legend titles
+    scale_color_manual(values = c('black', 'red', 'green'),
+                       name = 'Legend',
+                       labels = c('Mean', 'Lower Bound', 'Upper Bound')) +
+    
+    
+    theme(
+      panel.grid.major = element_line(color = 'gray', linetype = 'dashed'),
+      axis.ticks = element_line(),
+      axis.ticks.x = element_line(),
+      axis.ticks.y = element_line(),
+      axis.title.x = element_text(size = 18, face = "bold"),
+      axis.title.y = element_text(size = 18, face = "bold"),
+      plot.title = element_text(size = 24, face = "bold", hjust = 0.5),
+      axis.text.x = element_text(size = 18, color = "black", angle = 0),
+      axis.text.y = element_text(size = 18, color = "black"),
+      axis.line = element_line(color = "black"),
+      legend.position = "bottom",
+      legend.title = element_text(face = "bold"),
+      panel.background = element_rect(fill = "white"),
+      plot.background = element_rect(fill = "white"))
+  print(p)
+  # Save the plot
+  # ggsave(paste(dow, ".png"), plot = p, width = 10, height = 7, units = "in", dpi = 300)
+}
+```
+
+End of EDA
+
+
+### Experiment with LSTM (not reported)
+```{r}
+data = read.csv("daily_ride_data.csv")
+
+taxi.ts <- ts(data$Num_Rides, start = c(2021,1,1), frequency = 365)
+taxi.ts
+
+```
+
+```{r}
+library(keras)
+library(tensorflow)
+library(ggplot2)
+
+scale_factors <- c(mean(data$Num_Rides), sd(data$Num_Rides))
+scaled_train <- data %>%
+    dplyr::select(Num_Rides) %>%
+    dplyr::mutate(Num_Rides = (Num_Rides - scale_factors[1]) / scale_factors[2])
+
+prediction <- 30
+lag <- 30
+
+scaled_train <- as.matrix(scaled_train)
+
+# we lag the data 11 times and arrange that into columns
+x_train_data <- t(sapply(
+    1:(length(scaled_train) - lag - prediction + 1),
+    function(x) scaled_train[x:(x + lag - 1), 1]
+  ))
+ 
+# now we transform it into 3D form
+x_train_arr <- array(
+    data = as.numeric(unlist(x_train_data)),
+    dim = c(
+        nrow(x_train_data),
+        lag,
+        1
+    )
+)
+
+
+y_train_data <- t(sapply(
+    (1 + lag):(length(scaled_train) - prediction + 1),
+    function(x) scaled_train[x:(x + prediction - 1)]
+))
+ 
+y_train_arr <- array(
+    data = as.numeric(unlist(y_train_data)),
+    dim = c(
+        nrow(y_train_data),
+        prediction,
+        1
+    )
+)
+
+x_test <- data$Num_Rides[(nrow(scaled_train) - prediction + 1):nrow(scaled_train)]
+
+# scale the data with same scaling factors as for training
+x_test_scaled <- (x_test - scale_factors[1]) / scale_factors[2]
+ 
+# this time our array just has one sample, as we intend to perform one 12-months prediction
+x_pred_arr <- array(
+    data = x_test_scaled,
+    dim = c(
+        1,
+        lag,
+        1
+    )
+)
+
+
+lstm_model <- keras_model_sequential()
+ 
+lstm_model %>%
+  layer_lstm(units = 50, # size of the layer
+       batch_input_shape = c(1, 30, 1), # batch size, timesteps, features
+       return_sequences = TRUE,
+       stateful = TRUE) %>%
+  # fraction of the units to drop for the linear transformation of the inputs
+  layer_dropout(rate = 0.5) %>%
+  layer_lstm(units = 50,
+        return_sequences = TRUE,
+        stateful = TRUE) %>%
+  layer_dropout(rate = 0.5) %>%
+  time_distributed(keras::layer_dense(units = 1))
+
+lstm_model %>%
+    compile(loss = 'mae', optimizer = 'adam', metrics = 'accuracy')
+
+summary(lstm_model)
+
+lstm_model %>% fit(
+    x = x_train_arr,
+    y = y_train_arr,
+    batch_size = 1,
+    epochs = 50,
+    verbose = 0,
+    shuffle = FALSE
+)
+
+
+lstm_forecast <- lstm_model %>%
+    predict(x_pred_arr, batch_size = 1) %>%
+    .[, , 1]
+ 
+# we need to rescale the data to restore the original values
+lstm_forecast <- lstm_forecast * scale_factors[2] + scale_factors[1]
+
+fitted <- predict(lstm_model, x_train_arr, batch_size = 1) %>%.[, , 1]
+ 
+ if (dim(fitted)[2] > 1) {
+    fit <- c(fitted[, 1], fitted[dim(fitted)[1], 2:dim(fitted)[2]])
+} else {
+    fit <- fitted[, 1]
+}
+ 
+# additionally we need to rescale the data
+fitted <- fit * scale_factors[2] + scale_factors[1]
+nrow(fitted) # 562
+
+
+# I specify first forecast values as not available
+fitted <- c(rep(NA, lag), fitted)
+
+library(timetk)
+
+lstm_forecast1 <- timetk::tk_ts(lstm_forecast,
+    start = c(2023, 214),
+    end = c(2023, 243),
+    frequency = 365)
+
+input_ts <- timetk::tk_ts(data$Num_Rides, 
+    start = c(2021, 1), 
+    end = c(2023, 243), 
+    frequency = 365)
+
+
+forecast_list <- list(
+    model = NULL,
+    method = "LSTM",
+    mean = lstm_forecast1,
+    x = input_ts,
+    fitted = fitted,
+    residuals = as.numeric(input_ts) - as.numeric(fitted)
+  )
+ 
+class(forecast_list) <- "forecast"
+
+y_test = window(taxi.ts, start = c(2023, 214),end = c(2023, 243),frequency = 365)
+
+autoplot(lstm_forecast1) +
+  autolayer(y_test,series = "Actual")
+
+accuracy(lstm_forecast,y_test)
+```
+
+
+```{r}
+# Load necessary libraries
+library(timetk)
+library(tidyverse)
+
+# Assuming you have a time series object named taxi_ts with hourly data
+# Create daily aggregated time series
+taxi_daily <- taxi.ts %>%
+  tk_tbl(preserve_index = TRUE) %>%
+  tk_daily_summarize()
+
+# Check the structure of taxi_daily and ensure it's a ts object
+str(taxi_daily)
+
+# Split the data into training and testing sets
+train_data <- taxi_daily %>% filter(index(taxi_daily) < as.Date("2023-08-01"))
+test_data <- taxi_daily %>% filter(index(taxi_daily) >= as.Date("2023-08-01"))
+
+# Normalize the data
+scaler <- tk_scaler_range()
+train_scaled <- tk_fit_transform(train_data$rides, scaler)
+test_scaled <- tk_transform(test_data$rides, scaler)
+
+# Function to create LSTM model
+create_lstm_model <- function() {
+  model <- keras_model_sequential() %>%
+    layer_lstm(units = 50, input_shape = c(1, 1)) %>%
+    layer_dense(units = 1)
+  
+  model %>% compile(optimizer = 'adam', loss = 'mse')
+  
+  return(model)
+}
+
+# Reshape data for LSTM input
+X_train <- array_reshape(train_scaled, c(length(train_scaled), 1, 1))
+y_train <- array_reshape(train_scaled, c(length(train_scaled), 1))
+
+# Create and train the LSTM model
+lstm_model <- create_lstm_model()
+lstm_model %>% fit(X_train, y_train, epochs = 50, batch_size = 1, verbose = 2)
+
+# Reshape test data for prediction
+X_test <- array_reshape(test_scaled, c(length(test_scaled), 1, 1))
+
+# Predict using the trained model
+predicted_scaled <- lstm_model %>% predict(X_test)
+predicted <- tk_inverse_transform(predicted_scaled, scaler)
+
+# Visualize the results
+plot(index(test_data), test_data$rides, type = 'l', col = 'blue', ylim = c(0, max(test_data$rides, predicted)),
+     xlab = 'Date', ylab = 'Number of Rides', main = 'Taxi Ride Prediction with LSTM')
+lines(index(test_data), predicted, col = 'red')
+
+# Forecasting for the next 30 days
+future_dates <- seq(as.Date("2023-08-01"), as.Date("2023-08-31"), by = 'days')
+future_data <- tk_tbl(data.frame(index = future_dates), preserve_index = TRUE)
+X_future <- array_reshape(tk_transform(future_data, scaler), c(length(future_data), 1, 1))
+future_predicted_scaled <- lstm_model %>% predict(X_future)
+future_predicted <- tk_inverse_transform(future_predicted_scaled, scaler)
+
+# Visualize the forecast
+plot(future_dates, future_predicted, type = 'l', col = 'green', ylim = c(0, max(test_data$rides, future_predicted)),
+     xlab = 'Date', ylab = 'Number of Rides', main = 'Taxi Ride Forecast with LSTM')
+```
